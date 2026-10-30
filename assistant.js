@@ -42,9 +42,33 @@
     try {
       const cloud=window.OBRA_CLOUD;
       if(!cloud?.client) throw new Error('No se encontró la conexión con Supabase.');
-      const {data:{session},error:sessionError}=await cloud.client.auth.getSession();
-      if(sessionError || !session?.access_token) throw new Error('Tu sesión no está activa. Cierra sesión y vuelve a ingresar.');
-      const {data,error}=await cloud.client.functions.invoke('technical-assistant',{body:{message}});
+      // Supabase puede tardar un instante en restaurar la sesión persistida.
+      // Reintenta antes de declarar que el usuario no está autenticado.
+      let session = null;
+      let sessionError = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const result = await cloud.client.auth.getSession();
+        sessionError = result.error || null;
+        session = result.data?.session || null;
+        if (session?.access_token) break;
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+      if (!session?.access_token) {
+        // Último intento: renovar una sesión expirada si existe un refresh token.
+        const refreshed = await cloud.client.auth.refreshSession().catch(error => ({ data: { session: null }, error }));
+        session = refreshed.data?.session || null;
+        sessionError = refreshed.error || sessionError;
+      }
+      if (!session?.access_token) {
+        const localOnly = !cloud.client.auth;
+        throw new Error(localOnly
+          ? 'No se pudo acceder a la autenticación de Supabase.'
+          : 'OBRA CONTROL está abierto, pero esta cuenta no tiene una sesión activa de Supabase. Conecta tu cuenta desde “Acceso en la nube” para usar Don Planimetrón; el acceso local o de demostración no permite consultar los datos protegidos.');
+      }
+      const {data,error}=await cloud.client.functions.invoke('technical-assistant',{
+        body:{message},
+        headers:{Authorization:'Bearer '+session.access_token}
+      });
       waiting.remove();
       if(error) {
         let detail=error.message || 'No se pudo conectar con el asistente.';

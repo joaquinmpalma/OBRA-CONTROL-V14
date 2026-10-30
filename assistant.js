@@ -85,4 +85,62 @@
   const updateVisibility=()=>{ const logged=!document.body.classList.contains('auth-locked'); launch.style.display=logged?'block':'none'; if(!logged)panel.classList.remove('dp-open'); };
   updateVisibility();
   new MutationObserver(updateVisibility).observe(document.body,{attributes:true,attributeFilter:['class']});
+
+  // Acceso alternativo seguro: enlace mágico por correo, sin pedir la contraseña actual.
+  function installPasswordlessAccess() {
+    const cloudPanel = document.querySelector('.auth-cloud-panel');
+    if (!cloudPanel || cloudPanel.querySelector('#dp-magic-link')) return;
+    const form = cloudPanel.querySelector('form[data-form="cloud-login"]');
+    const email = cloudPanel.querySelector('#cloud-email');
+    if (!form || !email) return;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid #dce5df';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'dp-magic-link';
+    button.className = 'btn btn-sec';
+    button.textContent = 'Enviar enlace de acceso sin contraseña';
+    button.style.cssText = 'width:100%;margin-top:8px';
+    const status = document.createElement('p');
+    status.id = 'dp-magic-status';
+    status.className = 'muted small';
+    status.setAttribute('role','status');
+    status.style.cssText = 'margin:8px 0 0;line-height:1.4';
+    wrap.append(button,status);
+    form.insertAdjacentElement('afterend',wrap);
+    button.addEventListener('click', async () => {
+      const address = String(email.value || '').trim();
+      if (!address || !email.checkValidity()) {
+        status.textContent = 'Escribe primero el correo electrónico asociado a tu cuenta de OBRA CONTROL.';
+        email.focus();
+        return;
+      }
+      const client = window.OBRA_CLOUD?.client;
+      if (!client) {
+        status.textContent = 'No se encontró la conexión con Supabase.';
+        return;
+      }
+      button.disabled = true;
+      button.textContent = 'Enviando enlace…';
+      status.textContent = '';
+      try {
+        const { error } = await client.auth.signInWithOtp({
+          email: address,
+          options: {
+            emailRedirectTo: window.location.origin + window.location.pathname,
+            shouldCreateUser: false
+          }
+        });
+        if (error) throw error;
+        status.textContent = 'Si el correo corresponde a una cuenta existente, recibirás un enlace de acceso. Ábrelo desde este mismo dispositivo para entrar sin contraseña.';
+      } catch (error) {
+        status.textContent = 'No se pudo enviar el enlace: ' + (error?.message || 'error desconocido');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Enviar enlace de acceso sin contraseña';
+      }
+    });
+  }
+  installPasswordlessAccess();
+  new MutationObserver(installPasswordlessAccess).observe(document.body,{childList:true,subtree:true});
 })();
